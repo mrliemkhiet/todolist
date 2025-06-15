@@ -16,13 +16,22 @@ import { useTaskStore } from '../store/taskStore';
 import { supabase } from '../lib/supabase';
 import TaskModal from './TaskModal';
 
+interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  type: string;
+  read: boolean;
+  created_at: string;
+}
+
 const Header = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showTaskModal, setShowTaskModal] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   
   const { user, profile, logout } = useAuthStore();
   const { currentProject, tasks, fetchTasks } = useTaskStore();
@@ -33,31 +42,19 @@ const Header = () => {
       if (!user) return;
       
       try {
-        // Mock notifications for now - you can implement a notifications table
-        const mockNotifications = [
-          {
-            id: 1,
-            title: 'Task completed',
-            message: 'Design mockups have been completed',
-            time: '5 min ago',
-            unread: true
-          },
-          {
-            id: 2,
-            title: 'New comment',
-            message: 'Sarah commented on your project',
-            time: '1 hour ago',
-            unread: true
-          },
-          {
-            id: 3,
-            title: 'Deadline reminder',
-            message: 'API documentation due tomorrow',
-            time: '2 hours ago',
-            unread: false
-          }
-        ];
-        setNotifications(mockNotifications);
+        const { data, error } = await supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (error) {
+          console.error('Error fetching notifications:', error);
+          return;
+        }
+
+        setNotifications(data || []);
       } catch (error) {
         console.error('Error fetching notifications:', error);
       }
@@ -83,6 +80,39 @@ const Header = () => {
         console.error('Search error:', error);
       }
     }
+  };
+
+  const markNotificationAsRead = async (notificationId: string) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('id', notificationId);
+
+      if (error) throw error;
+
+      // Update local state
+      setNotifications(prev => 
+        prev.map(notif => 
+          notif.id === notificationId 
+            ? { ...notif, read: true }
+            : notif
+        )
+      );
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
+  };
+
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    
+    if (diffInMinutes < 1) return 'Just now';
+    if (diffInMinutes < 60) return `${diffInMinutes} min ago`;
+    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)} hour${Math.floor(diffInMinutes / 60) > 1 ? 's' : ''} ago`;
+    return `${Math.floor(diffInMinutes / 1440)} day${Math.floor(diffInMinutes / 1440) > 1 ? 's' : ''} ago`;
   };
 
   return (
@@ -129,7 +159,7 @@ const Header = () => {
                 className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all duration-200 relative"
               >
                 <Bell className="w-5 h-5" />
-                {notifications.filter(n => n.unread).length > 0 && (
+                {notifications.filter(n => !n.read).length > 0 && (
                   <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full"></span>
                 )}
               </button>
@@ -145,25 +175,32 @@ const Header = () => {
                     <h3 className="font-semibold text-gray-900">Notifications</h3>
                   </div>
                   <div className="max-h-64 overflow-y-auto">
-                    {notifications.map((notification) => (
-                      <div
-                        key={notification.id}
-                        className={`p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
-                          notification.unread ? 'bg-blue-50' : ''
-                        }`}
-                      >
-                        <div className="flex items-start space-x-3">
-                          <div className={`w-2 h-2 rounded-full mt-2 ${
-                            notification.unread ? 'bg-blue-500' : 'bg-gray-300'
-                          }`} />
-                          <div className="flex-1">
-                            <p className="font-medium text-gray-900">{notification.title}</p>
-                            <p className="text-sm text-gray-600">{notification.message}</p>
-                            <p className="text-xs text-gray-400 mt-1">{notification.time}</p>
+                    {notifications.length > 0 ? (
+                      notifications.map((notification) => (
+                        <div
+                          key={notification.id}
+                          className={`p-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
+                            !notification.read ? 'bg-blue-50' : ''
+                          }`}
+                          onClick={() => markNotificationAsRead(notification.id)}
+                        >
+                          <div className="flex items-start space-x-3">
+                            <div className={`w-2 h-2 rounded-full mt-2 ${
+                              !notification.read ? 'bg-blue-500' : 'bg-gray-300'
+                            }`} />
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900">{notification.title}</p>
+                              <p className="text-sm text-gray-600">{notification.message}</p>
+                              <p className="text-xs text-gray-400 mt-1">{formatTimeAgo(notification.created_at)}</p>
+                            </div>
                           </div>
                         </div>
+                      ))
+                    ) : (
+                      <div className="p-4 text-center text-gray-500">
+                        No notifications yet
                       </div>
-                    ))}
+                    )}
                   </div>
                   <div className="p-4 text-center">
                     <button className="text-blue-600 hover:text-blue-700 text-sm font-medium">

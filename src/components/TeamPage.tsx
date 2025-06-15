@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   Users, 
@@ -17,56 +17,119 @@ import {
 } from 'lucide-react';
 import { useTaskStore } from '../store/taskStore';
 import { useAuthStore } from '../store/authStore';
+import { supabase } from '../lib/supabase';
+
+interface TeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  avatar_url?: string;
+  last_active: string;
+  tasks_completed: number;
+  tasks_in_progress: number;
+}
+
+interface TeamActivity {
+  id: string;
+  user_name: string;
+  action: string;
+  target: string;
+  created_at: string;
+  type: string;
+}
 
 const TeamPage = () => {
   const { projects, tasks, currentProject } = useTaskStore();
   const { user, profile } = useAuthStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamActivity, setTeamActivity] = useState<TeamActivity[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Mock team members data (in a real app, this would come from the database)
-  const teamMembers = [
-    {
-      id: '1',
-      name: 'Nguyễn Xuân Lĩnh',
-      email: 'linh@taskflow.com',
-      role: 'owner',
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=NguyenXuanLinh&backgroundColor=b6e3f4&topType=ShortHairShortFlat&accessoriesType=Prescription02&hairColor=BrownDark&facialHairType=Blank&clotheType=Hoodie&clotheColor=Blue03&eyeType=Default&eyebrowType=Default&mouthType=Default&skinColor=Light',
-      lastActive: '2 hours ago',
-      tasksCompleted: 15,
-      tasksInProgress: 3
-    },
-    {
-      id: '2',
-      name: 'Trần Khánh',
-      email: 'khanh@taskflow.com',
-      role: 'admin',
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=TranKhanh&backgroundColor=c0aede&topType=ShortHairShortWaved&accessoriesType=Blank&hairColor=Black&facialHairType=Blank&clotheType=BlazerShirt&clotheColor=Blue01&eyeType=Default&eyebrowType=Default&mouthType=Default&skinColor=Light',
-      lastActive: '1 day ago',
-      tasksCompleted: 12,
-      tasksInProgress: 5
-    },
-    {
-      id: '3',
-      name: 'Ngô Lập',
-      email: 'lap@taskflow.com',
-      role: 'member',
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=NgoLap&backgroundColor=ffd93d&topType=ShortHairDreads01&accessoriesType=Blank&hairColor=BrownDark&facialHairType=Blank&clotheType=ShirtCrewNeck&clotheColor=Gray01&eyeType=Default&eyebrowType=Default&mouthType=Default&skinColor=Light',
-      lastActive: '3 hours ago',
-      tasksCompleted: 8,
-      tasksInProgress: 2
-    },
-    {
-      id: '4',
-      name: 'Ngô Nhân',
-      email: 'nhan@taskflow.com',
-      role: 'member',
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=NgoNhan&backgroundColor=ffdfbf&topType=ShortHairTheCaesar&accessoriesType=Blank&hairColor=Brown&facialHairType=Blank&clotheType=CollarSweater&clotheColor=Blue02&eyeType=Default&eyebrowType=Default&mouthType=Default&skinColor=Light',
-      lastActive: '5 hours ago',
-      tasksCompleted: 10,
-      tasksInProgress: 4
+  useEffect(() => {
+    fetchTeamData();
+  }, [currentProject, user]);
+
+  const fetchTeamData = async () => {
+    if (!user || !currentProject) {
+      setIsLoading(false);
+      return;
     }
-  ];
+
+    try {
+      setIsLoading(true);
+
+      // Fetch team members for current project
+      const { data: membersData, error: membersError } = await supabase
+        .from('project_members')
+        .select(`
+          role,
+          user:profiles (
+            id,
+            name,
+            email,
+            avatar_url
+          )
+        `)
+        .eq('project_id', currentProject);
+
+      if (membersError) throw membersError;
+
+      // Calculate task statistics for each member
+      const membersWithStats = await Promise.all(
+        (membersData || []).map(async (member: any) => {
+          const userTasks = tasks.filter(task => task.assignee_id === member.user.id);
+          const completedTasks = userTasks.filter(task => task.status === 'done').length;
+          const inProgressTasks = userTasks.filter(task => task.status === 'in-progress').length;
+
+          return {
+            id: member.user.id,
+            name: member.user.name,
+            email: member.user.email,
+            role: member.role,
+            avatar_url: member.user.avatar_url,
+            last_active: '2 hours ago', // This would come from a real activity tracking system
+            tasks_completed: completedTasks,
+            tasks_in_progress: inProgressTasks,
+          };
+        })
+      );
+
+      setTeamMembers(membersWithStats);
+
+      // Fetch team activity
+      const { data: activityData, error: activityError } = await supabase
+        .from('team_activity')
+        .select(`
+          *,
+          user:profiles (name)
+        `)
+        .eq('project_id', currentProject)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (activityError) throw activityError;
+
+      const formattedActivity = (activityData || []).map((activity: any) => ({
+        id: activity.id,
+        user_name: activity.user.name,
+        action: activity.action,
+        target: activity.target,
+        created_at: activity.created_at,
+        type: activity.action.includes('completed') ? 'completed' :
+              activity.action.includes('created') ? 'created' :
+              activity.action.includes('commented') ? 'commented' : 'updated'
+      }));
+
+      setTeamActivity(formattedActivity);
+    } catch (error) {
+      console.error('Error fetching team data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const getRoleIcon = (role: string) => {
     switch (role) {
@@ -98,12 +161,31 @@ const TeamPage = () => {
     }
   };
 
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    
+    if (diffInMinutes < 1) return 'Just now';
+    if (diffInMinutes < 60) return `${diffInMinutes} min ago`;
+    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)} hour${Math.floor(diffInMinutes / 60) > 1 ? 's' : ''} ago`;
+    return `${Math.floor(diffInMinutes / 1440)} day${Math.floor(diffInMinutes / 1440) > 1 ? 's' : ''} ago`;
+  };
+
   const filteredMembers = teamMembers.filter(member =>
     member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     member.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const currentProjectData = projects.find(p => p.id === currentProject);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -158,9 +240,9 @@ const TeamPage = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           {[
             { label: 'Total Members', value: teamMembers.length, color: 'blue' },
-            { label: 'Active Today', value: 3, color: 'green' },
-            { label: 'Tasks Completed', value: teamMembers.reduce((sum, member) => sum + member.tasksCompleted, 0), color: 'purple' },
-            { label: 'Tasks In Progress', value: teamMembers.reduce((sum, member) => sum + member.tasksInProgress, 0), color: 'orange' },
+            { label: 'Active Today', value: teamMembers.filter(m => m.last_active.includes('hour')).length, color: 'green' },
+            { label: 'Tasks Completed', value: teamMembers.reduce((sum, member) => sum + member.tasks_completed, 0), color: 'purple' },
+            { label: 'Tasks In Progress', value: teamMembers.reduce((sum, member) => sum + member.tasks_in_progress, 0), color: 'orange' },
           ].map((stat, index) => (
             <motion.div
               key={index}
@@ -195,7 +277,7 @@ const TeamPage = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-4">
                     <img 
-                      src={member.avatar} 
+                      src={member.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${member.email}`} 
                       alt={member.name}
                       className="w-12 h-12 rounded-full"
                     />
@@ -210,12 +292,12 @@ const TeamPage = () => {
 
                   <div className="flex items-center space-x-6">
                     <div className="text-center">
-                      <div className="text-sm font-medium text-gray-900">{member.tasksCompleted}</div>
+                      <div className="text-sm font-medium text-gray-900">{member.tasks_completed}</div>
                       <div className="text-xs text-gray-500">Completed</div>
                     </div>
                     
                     <div className="text-center">
-                      <div className="text-sm font-medium text-gray-900">{member.tasksInProgress}</div>
+                      <div className="text-sm font-medium text-gray-900">{member.tasks_in_progress}</div>
                       <div className="text-xs text-gray-500">In Progress</div>
                     </div>
 
@@ -228,7 +310,7 @@ const TeamPage = () => {
 
                     <div className="text-right">
                       <div className="text-sm text-gray-500">Last active</div>
-                      <div className="text-xs text-gray-400">{member.lastActive}</div>
+                      <div className="text-xs text-gray-400">{member.last_active}</div>
                     </div>
 
                     <button className="p-1 hover:bg-gray-100 rounded transition-colors">
@@ -249,51 +331,28 @@ const TeamPage = () => {
 
           <div className="p-6">
             <div className="space-y-4">
-              {[
-                {
-                  user: 'Nguyễn Xuân Lĩnh',
-                  action: 'completed task',
-                  target: 'Design system documentation',
-                  time: '2 hours ago',
-                  type: 'completed'
-                },
-                {
-                  user: 'Trần Khánh',
-                  action: 'created task',
-                  target: 'API endpoint testing',
-                  time: '4 hours ago',
-                  type: 'created'
-                },
-                {
-                  user: 'Ngô Lập',
-                  action: 'commented on',
-                  target: 'User interface mockups',
-                  time: '6 hours ago',
-                  type: 'commented'
-                },
-                {
-                  user: 'Ngô Nhân',
-                  action: 'updated task',
-                  target: 'Database optimization',
-                  time: '1 day ago',
-                  type: 'updated'
-                }
-              ].map((activity, index) => (
-                <div key={index} className="flex items-center space-x-3">
-                  <div className={`w-2 h-2 rounded-full ${
-                    activity.type === 'completed' ? 'bg-green-500' :
-                    activity.type === 'created' ? 'bg-blue-500' :
-                    activity.type === 'commented' ? 'bg-yellow-500' :
-                    'bg-purple-500'
-                  }`} />
-                  <div className="flex-1">
-                    <span className="font-medium text-gray-900">{activity.user}</span>
-                    <span className="text-gray-600"> {activity.action} </span>
-                    <span className="font-medium text-gray-900">{activity.target}</span>
+              {teamActivity.length > 0 ? (
+                teamActivity.map((activity, index) => (
+                  <div key={activity.id} className="flex items-center space-x-3">
+                    <div className={`w-2 h-2 rounded-full ${
+                      activity.type === 'completed' ? 'bg-green-500' :
+                      activity.type === 'created' ? 'bg-blue-500' :
+                      activity.type === 'commented' ? 'bg-yellow-500' :
+                      'bg-purple-500'
+                    }`} />
+                    <div className="flex-1">
+                      <span className="font-medium text-gray-900">{activity.user_name}</span>
+                      <span className="text-gray-600"> {activity.action} </span>
+                      <span className="font-medium text-gray-900">{activity.target}</span>
+                    </div>
+                    <span className="text-sm text-gray-500">{formatTimeAgo(activity.created_at)}</span>
                   </div>
-                  <span className="text-sm text-gray-500">{activity.time}</span>
+                ))
+              ) : (
+                <div className="text-center text-gray-500 py-8">
+                  No recent activity to display
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>

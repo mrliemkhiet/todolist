@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { supabase } from '../lib/supabase';
+import { useAuthStore } from './authStore';
 import type { Task, Project, Subtask, TaskTag } from '../lib/supabase';
 
 export interface TaskWithDetails extends Task {
@@ -51,20 +52,15 @@ interface TaskState {
   clearError: () => void;
 }
 
-// Helper function to get authenticated user
-const getAuthenticatedUser = async () => {
-  const { data: { session }, error } = await supabase.auth.getSession();
+// Helper function to get authenticated user from auth store
+const getAuthenticatedUser = () => {
+  const { user } = useAuthStore.getState();
   
-  if (error) {
-    console.error('Session error:', error);
-    throw new Error('Authentication failed');
-  }
-  
-  if (!session?.user) {
+  if (!user) {
     throw new Error('Not authenticated');
   }
   
-  return session.user;
+  return user;
 };
 
 export const useTaskStore = create<TaskState>()(
@@ -81,7 +77,7 @@ export const useTaskStore = create<TaskState>()(
         set({ isLoading: true, error: null });
         
         try {
-          const user = await getAuthenticatedUser();
+          const user = getAuthenticatedUser();
 
           // First check if user has any projects, if not create a default one
           const { data: existingProjects } = await supabase
@@ -156,7 +152,7 @@ export const useTaskStore = create<TaskState>()(
         set({ isLoading: true, error: null });
         
         try {
-          const user = await getAuthenticatedUser();
+          const user = getAuthenticatedUser();
 
           const { data, error } = await supabase
             .from('tasks')
@@ -185,7 +181,7 @@ export const useTaskStore = create<TaskState>()(
         set({ isLoading: true, error: null });
         
         try {
-          await getAuthenticatedUser(); // Verify authentication
+          getAuthenticatedUser(); // Verify authentication
 
           const { error } = await supabase
             .from('tasks')
@@ -213,7 +209,7 @@ export const useTaskStore = create<TaskState>()(
         set({ isLoading: true, error: null });
         
         try {
-          await getAuthenticatedUser(); // Verify authentication
+          getAuthenticatedUser(); // Verify authentication
 
           const { error } = await supabase
             .from('tasks')
@@ -238,7 +234,7 @@ export const useTaskStore = create<TaskState>()(
         set({ isLoading: true, error: null });
         
         try {
-          const user = await getAuthenticatedUser();
+          const user = getAuthenticatedUser();
 
           // Fetch projects with members
           const { data: projectsData, error: projectsError } = await supabase
@@ -290,7 +286,7 @@ export const useTaskStore = create<TaskState>()(
         set({ isLoading: true, error: null });
         
         try {
-          const user = await getAuthenticatedUser();
+          const user = getAuthenticatedUser();
 
           // Create project
           const { data: project, error: projectError } = await supabase
@@ -333,7 +329,7 @@ export const useTaskStore = create<TaskState>()(
         set({ isLoading: true, error: null });
         
         try {
-          await getAuthenticatedUser(); // Verify authentication
+          getAuthenticatedUser(); // Verify authentication
 
           const { error } = await supabase
             .from('projects')
@@ -361,7 +357,7 @@ export const useTaskStore = create<TaskState>()(
         set({ isLoading: true, error: null });
         
         try {
-          await getAuthenticatedUser(); // Verify authentication
+          getAuthenticatedUser(); // Verify authentication
 
           const { error } = await supabase
             .from('projects')
